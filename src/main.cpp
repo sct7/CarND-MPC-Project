@@ -77,13 +77,15 @@ int main() {
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
     string sdata = string(data).substr(0, length);
-    cout << sdata << endl;
+    //cout << sdata << endl;
     if (sdata.size() > 2 && sdata[0] == '4' && sdata[1] == '2') {
       string s = hasData(sdata);
       if (s != "") {
         auto j = json::parse(s);
         string event = j[0].get<string>();
         if (event == "telemetry") {
+
+          //cout<<"Let's get this party started"<<endl;
           // j[1] is the data JSON object
           vector<double> ptsx = j[1]["ptsx"];
           vector<double> ptsy = j[1]["ptsy"];
@@ -91,6 +93,40 @@ int main() {
           double py = j[1]["y"];
           double psi = j[1]["psi"];
           double v = j[1]["speed"];
+          double psi_unity = j[1]["psi_unity"];
+
+          Eigen::VectorXd x_points(ptsx.size());
+          Eigen::VectorXd y_points(ptsy.size());
+
+          cout<<"X: "<<px<<endl;
+          cout<<"Y: "<<py<<endl;
+          cout<<"Psi: "<<psi<<endl;
+          cout<<"Psi unity: "<<psi_unity<<endl;
+
+          for (int i=0; i<ptsx.size(); ++i){
+            double new_x = cos(psi_unity-pi()/2)*(ptsx[i]-px) - sin(psi_unity-pi()/2)*(ptsy[i]-py);
+            double new_y = cos(psi_unity-pi()/2)*(ptsy[i]-py) + sin(psi_unity-pi()/2)*(ptsx[i]-px);
+            cout<<ptsx[i]<<" "<<new_x<<endl;
+            cout<<ptsy[i]<<" "<<new_y<<endl;
+            ptsx[i] = new_x;
+            ptsy[i] = new_y;
+            x_points(i) = new_x;
+            y_points(i) = new_y;
+          }
+          
+          //cout<<"Ok, we've read and converted the points"<<endl;
+
+          Eigen::VectorXd coeffs = polyfit(x_points, y_points, 3);
+          cout<<"Coeffs: "<<endl; 
+          cout<<coeffs<<endl;
+
+          Eigen::VectorXd state(6);
+          state << 0.0, 0.0, psi_unity-pi()/2, v, 0.0, 0.0;
+
+          auto c = mpc.Solve(state, coeffs);
+          //cout<<c<<endl;
+
+          //cout<<"We have controls"<<endl;
 
           /*
           * TODO: Calculate steering angle and throttle using MPC.
@@ -98,13 +134,18 @@ int main() {
           * Both are in between [-1, 1].
           *
           */
-          double steer_value;
-          double throttle_value;
+
+
+          double steer_value = c[0];
+          double throttle_value = c[1];
+
+          cout<<"Throttle: "<<throttle_value<<endl;
+          cout<<"Steer value: "<<steer_value<<endl;
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
           // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
-          msgJson["steering_angle"] = steer_value;
+          msgJson["steering_angle"] = steer_value/deg2rad(25);
           msgJson["throttle"] = throttle_value;
 
           //Display the MPC predicted trajectory 
@@ -118,8 +159,8 @@ int main() {
           msgJson["mpc_y"] = mpc_y_vals;
 
           //Display the waypoints/reference line
-          vector<double> next_x_vals;
-          vector<double> next_y_vals;
+          vector<double> next_x_vals = ptsx;
+          vector<double> next_y_vals = ptsy;
 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Yellow line
@@ -139,7 +180,7 @@ int main() {
           //
           // NOTE: REMEMBER TO SET THIS TO 100 MILLISECONDS BEFORE
           // SUBMITTING.
-          this_thread::sleep_for(chrono::milliseconds(100));
+          this_thread::sleep_for(chrono::milliseconds(0));
           ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
         }
       } else {
